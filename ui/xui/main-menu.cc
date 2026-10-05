@@ -1233,8 +1233,11 @@ bool MainMenuSnapshotsView::BigSnapshotButton(QEMUSnapshotInfo *snapshot,
     g_autoptr(GDateTime) date =
         g_date_time_new_from_unix_local(snapshot->date_sec);
     char *date_buf = g_date_time_format(date, "%Y-%m-%d %H:%M:%S");
+    char *date_text = g_strdup_printf("%s  (%s)", date_buf,
+                                      data->external ? "File" : "HDD image");
     draw_list->AddText(ImVec2(p0.x + date_pos.x, p0.y + date_pos.y),
-                       IM_COL32(255, 255, 255, 200), date_buf);
+                       IM_COL32(255, 255, 255, 200), date_text);
+    g_free(date_text);
     g_free(date_buf);
 
     // Snapshot keyboard binding
@@ -1338,8 +1341,9 @@ void MainMenuSnapshotsView::Draw()
 
     bool snapshot_with_create_name_exists = false;
     for (int i = 0; i < g_snapshot_mgr.m_snapshots_len; ++i) {
-        if (external_storage &&
-            g_snapshot_mgr.m_extra_data[i].title_id != running_title_id) {
+        const XemuSnapshotData *data = &g_snapshot_mgr.m_extra_data[i];
+        if (data->external != external_storage ||
+            (external_storage && data->title_id != running_title_id)) {
             continue;
         }
         if (g_strcmp0(m_search_buf.c_str(),

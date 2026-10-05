@@ -61,20 +61,9 @@ XemuSnapshotData *SnapshotManager::FindSnapshotData(const char *name)
 {
     Refresh();
 
-    if (xemu_snapshots_using_external_storage()) {
-        QEMUSnapshotInfo *info;
-        XemuSnapshotData *data;
-        return xemu_snapshots_external_lookup(name, &info, &data) ? data :
-                                                                    NULL;
-    }
-
-    for (int i = 0; i < m_snapshots_len; i++) {
-        if (!strcmp(m_snapshots[i].name, name)) {
-            return &m_extra_data[i];
-        }
-    }
-
-    return NULL;
+    QEMUSnapshotInfo *info;
+    XemuSnapshotData *data;
+    return xemu_snapshots_find(name, &info, &data) ? data : NULL;
 }
 
 void SnapshotManager::LoadSnapshotChecked(const char *name)

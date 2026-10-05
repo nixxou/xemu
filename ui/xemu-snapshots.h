@@ -45,6 +45,8 @@ typedef struct XemuSnapshotData {
     bool has_disc_identity;
     XemuDiscIdentity disc_identity;
 
+    bool external; // Stored in a file rather than in the HDD image
+
     // External storage only
     uint32_t title_id;
     uint64_t ram_size;
@@ -68,6 +70,8 @@ void xemu_snapshots_save(const char *vm_name, Error **err);
 void xemu_snapshots_delete(const char *vm_name, Error **err);
 bool xemu_snapshots_using_external_storage(void);
 const char *xemu_snapshots_get_key(const QEMUSnapshotInfo *info);
+bool xemu_snapshots_find(const char *ref, QEMUSnapshotInfo **info,
+                         XemuSnapshotData **data);
 XemuSnapshotDiscCheck xemu_snapshots_check_disc(const XemuSnapshotData *data);
 void xemu_snapshots_load_file(const char *path, Error **err);
 
@@ -78,8 +82,6 @@ void xemu_snapshots_mark_dirty(void);
 // Implemented in xemu-snapshots-external.c
 int xemu_snapshots_external_list(QEMUSnapshotInfo **info,
                                  XemuSnapshotData **extra_data, Error **err);
-bool xemu_snapshots_external_lookup(const char *ref, QEMUSnapshotInfo **info,
-                                    XemuSnapshotData **data);
 bool xemu_snapshots_external_read_info(const char *path,
                                        QEMUSnapshotInfo *info,
                                        XemuSnapshotData *data,

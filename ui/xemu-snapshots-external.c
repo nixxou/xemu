@@ -816,6 +816,7 @@ static void parse_meta(const uint8_t *meta, size_t len, QEMUSnapshotInfo *info,
         data->title_id = v32;
     }
 
+    data->external = true;
     data->xbe_title_name =
         xemu_snapshot_meta_get_str(meta, len, XEMU_SNAPSHOT_META_TITLE_NAME);
     data->disc_path =
@@ -1031,18 +1032,6 @@ static int find_snapshot(const char *ref)
         }
     }
     return -1;
-}
-
-bool xemu_snapshots_external_lookup(const char *ref, QEMUSnapshotInfo **info,
-                                    XemuSnapshotData **data)
-{
-    int i = find_snapshot(ref);
-    if (i < 0) {
-        return false;
-    }
-    *info = &external_info[i];
-    *data = &external_data[i];
-    return true;
 }
 
 void xemu_snapshots_external_save(const char *ref, Error **errp)

@@ -27,7 +27,7 @@ New settings in `[general.snapshots]`:
 | `dir`      | path                       | `<xemu data dir>/snapshots` |
 | `compress` | bool                       | `true`                      |
 
-With `storage = 'external'`, every snapshot is a standalone file:
+With `storage = 'external'`, every new snapshot is a standalone file:
 
     <dir>/<TITLEID>/<name>.xsnap
 
@@ -44,9 +44,12 @@ qualified id (`<TITLEID>/<file name>`) so the list always acts on the entry
 that was clicked. As a result F5-F8 act as per-game slots with external
 storage.
 
-The snapshot manager, the F5-F8 / Shift+F5-F8 bindings and the menu entries
-work on both storages. Switching `storage` only changes where new snapshots go
-and which ones are listed; internal snapshots stay in the HDD image.
+The snapshot manager lists the snapshots of both storages side by side
+("HDD image" or "File" next to the date), and loading, replacing or deleting
+an entry acts on the storage it lives in. `storage` decides where new
+snapshots go (Create, Shift+F5-F8) and which storage a bare name is looked up
+in first (F5-F8). Switching it moves nothing: internal snapshots stay in the
+HDD image. Internal entries carry the id `HDD:<id>` in the list.
 
 A frontend can restore a snapshot file at start:
 
@@ -231,8 +234,9 @@ payloads as is.
 
 ## Code layout
 
-- `ui/xemu-snapshots.c`: public `xemu_snapshots_*` functions dispatch to the
-  internal implementation (unchanged) or the external one.
+- `ui/xemu-snapshots.c`: public `xemu_snapshots_*` functions list both
+  storages and dispatch each entry to the internal implementation (unchanged)
+  or the external one.
 - `ui/xemu-snapshots-external.c`: external storage (directory layout, save,
   load, delete, list, HDD capture/restore).
 - `ui/xemu-snapshot-file.c`: file format reader/writer, no dependency on the
@@ -281,7 +285,6 @@ few MB takes well under a second either way.
 
 - The UI freezes while a snapshot is saved or loaded (the work runs on the UI
   thread with the VM paused, as for internal snapshots).
-- There is no UI to choose the storage yet; it is set in `xemu.toml`.
 
 - Saving takes as long as reading the top layer of the HDD (the VM is paused
   meanwhile). It is fast for overlays and proportional to used space for

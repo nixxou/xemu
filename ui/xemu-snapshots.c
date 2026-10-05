@@ -198,24 +198,23 @@ static void xemu_snapshots_all_load_data(QEMUSnapshotInfo **info,
         xemu_snapshots_dirty = false;
 }
 
-int xemu_snapshots_list(QEMUSnapshotInfo **info, XemuSnapshotData **extra_data,
-                        Error **err)
+static int xemu_snapshots_internal_list(QEMUSnapshotInfo **info,
+                                        XemuSnapshotData **extra_data,
+                                        Error **err)
 {
     BlockDriverState *bs;
     int snapshots_len;
     assert(err);
-
-    if (xemu_snapshots_using_external_storage()) {
-        return xemu_snapshots_external_list(info, extra_data, err);
-    }
 
     if (!xemu_snapshots_dirty && xemu_snapshots_extra_data &&
         xemu_snapshots_metadata) {
         goto done;
     }
 
-    if (xemu_snapshots_metadata)
+    if (xemu_snapshots_metadata) {
         g_free(xemu_snapshots_metadata);
+        xemu_snapshots_metadata = NULL;
+    }
 
     bs = bdrv_all_find_vmstate_bs(NULL, false, NULL, err);
     if (!bs) {
@@ -242,6 +241,150 @@ done:
     }
 
     return xemu_snapshots_len;
+}
+
+/*
+ * Snapshots of both storages, oldest first. Internal entries get an id of
+ * the form "HDD:<id>", external ones "<title id>/<file name>".
+ */
+static QEMUSnapshotInfo *merged_info;
+static XemuSnapshotData *merged_data;
+static int merged_len;
+
+static int compare_merged(const void *a, const void *b)
+{
+    const QEMUSnapshotInfo *ia = &merged_info[*(const int *)a];
+    const QEMUSnapshotInfo *ib = &merged_info[*(const int *)b];
+    if (ia->date_sec != ib->date_sec) {
+        return ia->date_sec < ib->date_sec ? -1 : 1;
+    }
+    if (ia->date_nsec != ib->date_nsec) {
+        return ia->date_nsec < ib->date_nsec ? -1 : 1;
+    }
+    return *(const int *)a - *(const int *)b;
+}
+
+int xemu_snapshots_list(QEMUSnapshotInfo **info, XemuSnapshotData **extra_data,
+                        Error **err)
+{
+    QEMUSnapshotInfo *int_info = NULL, *ext_info = NULL;
+    XemuSnapshotData *int_data = NULL, *ext_data = NULL;
+    Error *int_err = NULL;
+    assert(err);
+
+    int int_len = xemu_snapshots_internal_list(&int_info, &int_data, &int_err);
+    if (int_len < 0) {
+        /* Without an HDD supporting snapshots, only files can be listed */
+        if (!xemu_snapshots_using_external_storage()) {
+            error_propagate(err, int_err);
+            return -1;
+        }
+        error_free(int_err);
+        int_len = 0;
+    }
+    int ext_len = xemu_snapshots_external_list(&ext_info, &ext_data, err);
+    if (ext_len < 0) {
+        return -1;
+    }
+
+    merged_len = int_len + ext_len;
+    merged_info = g_renew(QEMUSnapshotInfo, merged_info, MAX(merged_len, 1));
+    merged_data = g_renew(XemuSnapshotData, merged_data, MAX(merged_len, 1));
+    for (int i = 0; i < int_len; i++) {
+        merged_info[i] = int_info[i];
+        snprintf(merged_info[i].id_str, sizeof(merged_info[i].id_str),
+                 "HDD:%s", int_info[i].id_str);
+        merged_data[i] = int_data[i];
+        merged_data[i].external = false;
+    }
+    for (int i = 0; i < ext_len; i++) {
+        merged_info[int_len + i] = ext_info[i];
+        merged_data[int_len + i] = ext_data[i];
+    }
+
+    g_autofree int *order = g_new(int, MAX(merged_len, 1));
+    for (int i = 0; i < merged_len; i++) {
+        order[i] = i;
+    }
+    qsort(order, merged_len, sizeof(int), compare_merged);
+    g_autofree QEMUSnapshotInfo *sorted_info =
+        g_new(QEMUSnapshotInfo, MAX(merged_len, 1));
+    g_autofree XemuSnapshotData *sorted_data =
+        g_new(XemuSnapshotData, MAX(merged_len, 1));
+    for (int i = 0; i < merged_len; i++) {
+        sorted_info[i] = merged_info[order[i]];
+        sorted_data[i] = merged_data[order[i]];
+    }
+    memcpy(merged_info, sorted_info, sizeof(*merged_info) * merged_len);
+    memcpy(merged_data, sorted_data, sizeof(*merged_data) * merged_len);
+
+    if (info) {
+        *info = merged_info;
+    }
+    if (extra_data) {
+        *extra_data = merged_data;
+    }
+    return merged_len;
+}
+
+static uint32_t get_running_title_id(void)
+{
+    struct xbe *xbe = xemu_get_xbe_info();
+    return (xbe && xbe->cert) ? ldl_le_p(&xbe->cert->m_titleid) : 0;
+}
+
+/*
+ * Resolves a snapshot reference: an id from the list, or a name. Names are
+ * looked up in the selected storage first; external names in the running
+ * title's folder first, then the most recent.
+ */
+static int xemu_snapshots_find_index(const char *ref)
+{
+    Error *err = NULL;
+    if (xemu_snapshots_list(NULL, NULL, &err) < 0) {
+        error_free(err);
+        return -1;
+    }
+
+    for (int i = 0; i < merged_len; i++) {
+        if (!strcmp(merged_info[i].id_str, ref)) {
+            return i;
+        }
+    }
+
+    bool prefer_external = xemu_snapshots_using_external_storage();
+    uint32_t title_id = get_running_title_id();
+    for (int pass = 0; pass < 3; pass++) {
+        for (int i = merged_len - 1; i >= 0; i--) {
+            bool external = merged_data[i].external;
+            if (strcmp(merged_info[i].name, ref)) {
+                continue;
+            }
+            if (pass == 0 && external == prefer_external &&
+                (!external || merged_data[i].title_id == title_id)) {
+                return i;
+            }
+            if (pass == 1 && external == prefer_external) {
+                return i;
+            }
+            if (pass == 2) {
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
+bool xemu_snapshots_find(const char *ref, QEMUSnapshotInfo **info,
+                         XemuSnapshotData **data)
+{
+    int i = xemu_snapshots_find_index(ref);
+    if (i < 0) {
+        return false;
+    }
+    *info = &merged_info[i];
+    *data = &merged_data[i];
+    return true;
 }
 
 char *xemu_get_currently_loaded_disc_path(void)
@@ -315,7 +458,7 @@ bool xemu_snapshots_using_external_storage(void)
 
 const char *xemu_snapshots_get_key(const QEMUSnapshotInfo *info)
 {
-    return xemu_snapshots_using_external_storage() ? info->id_str : info->name;
+    return info->id_str;
 }
 
 void xemu_snapshots_load_file(const char *path, Error **err)
@@ -360,9 +503,17 @@ out:
 
 void xemu_snapshots_load(const char *vm_name, Error **err)
 {
-    if (xemu_snapshots_using_external_storage()) {
-        xemu_snapshots_external_load(vm_name, err);
+    int i = xemu_snapshots_find_index(vm_name);
+    if (i >= 0 && merged_data[i].external) {
+        xemu_snapshots_external_load(merged_info[i].id_str, err);
         return;
+    }
+    if (i < 0 && xemu_snapshots_using_external_storage()) {
+        error_setg(err, "Snapshot '%s' does not exist", vm_name);
+        return;
+    }
+    if (i >= 0) {
+        vm_name = merged_info[i].name;
     }
 
     bool vm_running = runstate_is_running();
@@ -377,10 +528,29 @@ void xemu_snapshots_save(const char *vm_name, Error **err)
     xemu_snapshots_has_disc_identity =
         xemu_get_currently_loaded_disc_identity(&xemu_snapshots_disc_identity);
 
-    if (xemu_snapshots_using_external_storage()) {
-        xemu_snapshots_external_save(vm_name, err);
+    /* Entries picked from the list are replaced where they are stored */
+    bool external = xemu_snapshots_using_external_storage();
+    g_autofree char *name = g_strdup(vm_name);
+    if (vm_name) {
+        Error *local_err = NULL;
+        if (xemu_snapshots_list(NULL, NULL, &local_err) >= 0) {
+            for (int i = 0; i < merged_len; i++) {
+                if (!strcmp(merged_info[i].id_str, vm_name)) {
+                    external = merged_data[i].external;
+                    g_free(name);
+                    name = g_strdup(external ? merged_info[i].id_str :
+                                               merged_info[i].name);
+                    break;
+                }
+            }
+        }
+        error_free(local_err);
+    }
+
+    if (external) {
+        xemu_snapshots_external_save(name, err);
     } else {
-        save_snapshot(vm_name, true, NULL, false, NULL, err);
+        save_snapshot(name, true, NULL, false, NULL, err);
     }
 
     xemu_snapshots_has_disc_identity = false;
@@ -388,12 +558,17 @@ void xemu_snapshots_save(const char *vm_name, Error **err)
 
 void xemu_snapshots_delete(const char *vm_name, Error **err)
 {
-    if (xemu_snapshots_using_external_storage()) {
-        xemu_snapshots_external_delete(vm_name, err);
+    int i = xemu_snapshots_find_index(vm_name);
+    if (i < 0) {
+        error_setg(err, "Snapshot '%s' does not exist", vm_name);
+        return;
+    }
+    if (merged_data[i].external) {
+        xemu_snapshots_external_delete(merged_info[i].id_str, err);
         return;
     }
 
-    delete_snapshot(vm_name, false, NULL, err);
+    delete_snapshot(merged_info[i].name, false, NULL, err);
 }
 
 void xemu_snapshots_save_extra_data(QEMUFile *f)
