@@ -27,6 +27,7 @@ extern "C" {
 #endif
 
 #include "block/snapshot.h"
+#include "xemu-disc-identity.h"
 #include <epoxy/gl.h>
 
 #define XEMU_SNAPSHOT_DATA_MAGIC 0x78656d75 // 'xemu'
@@ -41,15 +42,25 @@ typedef struct XemuSnapshotData {
     char *disc_path;
     char *xbe_title_name;
     GLuint gl_thumbnail;
+    bool has_disc_identity;
+    XemuDiscIdentity disc_identity;
 } XemuSnapshotData;
+
+typedef enum XemuSnapshotDiscCheck {
+    XEMU_SNAPSHOT_DISC_MATCH,
+    XEMU_SNAPSHOT_DISC_NONE, // The snapshot was taken without a disc
+    XEMU_SNAPSHOT_DISC_MISMATCH,
+} XemuSnapshotDiscCheck;
 
 // Implemented in xemu-snapshots.c
 char *xemu_get_currently_loaded_disc_path(void);
+bool xemu_get_currently_loaded_disc_identity(XemuDiscIdentity *id);
 int xemu_snapshots_list(QEMUSnapshotInfo **info, XemuSnapshotData **extra_data,
                         Error **err);
 void xemu_snapshots_load(const char *vm_name, Error **err);
 void xemu_snapshots_save(const char *vm_name, Error **err);
 void xemu_snapshots_delete(const char *vm_name, Error **err);
+XemuSnapshotDiscCheck xemu_snapshots_check_disc(const XemuSnapshotData *data);
 
 void xemu_snapshots_save_extra_data(QEMUFile *f);
 bool xemu_snapshots_offset_extra_data(QEMUFile *f);

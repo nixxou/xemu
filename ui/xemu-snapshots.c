@@ -33,6 +33,7 @@
 #include "migration/snapshot.h"
 #include "qapi/error.h"
 #include "qapi/qapi-commands-block.h"
+#include "system/block-backend.h"
 #include "system/runstate.h"
 
 #include "ui/console.h"
@@ -42,6 +43,13 @@ static QEMUSnapshotInfo *xemu_snapshots_metadata = NULL;
 static XemuSnapshotData *xemu_snapshots_extra_data = NULL;
 static int xemu_snapshots_len = 0;
 static bool xemu_snapshots_dirty = true;
+
+/*
+ * Identity of the disc mounted when a snapshot is being saved. Read before
+ * saving starts: block devices are drained while the VM state is written.
+ */
+static XemuDiscIdentity xemu_snapshots_disc_identity;
+static bool xemu_snapshots_has_disc_identity;
 
 const char **g_snapshot_shortcut_index_key_map[] = {
     &g_config.general.snapshots.shortcuts.f5,
@@ -57,6 +65,7 @@ static void xemu_snapshots_load_data(BlockDriverState *bs_ro,
     data->disc_path = NULL;
     data->xbe_title_name = NULL;
     data->gl_thumbnail = 0;
+    data->has_disc_identity = false;
 
     int res = bdrv_snapshot_load_tmp(bs_ro, info->id_str, info->name, err);
     if (res < 0) {
@@ -125,6 +134,18 @@ static void xemu_snapshots_load_data(BlockDriverState *bs_ro,
             glDeleteTextures(1, &thumbnail);
         }
         offset += thumbnail_size;
+    }
+
+    // Fields added after the first version are optional
+    if (size >= offset + 4) {
+        const size_t disc_identity_size =
+            be32_to_cpu(*(uint32_t *)&buf[offset]);
+        offset += 4;
+        if (disc_identity_size && size >= offset + disc_identity_size) {
+            data->has_disc_identity = xemu_disc_identity_deserialize(
+                &buf[offset], disc_identity_size, &data->disc_identity);
+            offset += disc_identity_size;
+        }
     }
 
     g_free(buf);
@@ -238,6 +259,48 @@ char *xemu_get_currently_loaded_disc_path(void)
     return file;
 }
 
+static bool read_disc(void *opaque, uint64_t offset, void *buf, size_t len)
+{
+    return blk_pread(opaque, offset, len, buf, 0) >= 0;
+}
+
+bool xemu_get_currently_loaded_disc_identity(XemuDiscIdentity *id)
+{
+    BlockBackend *blk = blk_by_name("ide0-cd1");
+    if (!blk || !blk_is_inserted(blk)) {
+        return false;
+    }
+
+    int64_t size = blk_getlength(blk);
+    if (size < 0) {
+        return false;
+    }
+
+    return xemu_disc_identity_compute(read_disc, blk, size, id);
+}
+
+XemuSnapshotDiscCheck xemu_snapshots_check_disc(const XemuSnapshotData *data)
+{
+    if (!data->disc_path && !data->has_disc_identity) {
+        return XEMU_SNAPSHOT_DISC_NONE;
+    }
+
+    if (data->has_disc_identity) {
+        XemuDiscIdentity current;
+        if (xemu_get_currently_loaded_disc_identity(&current)) {
+            return xemu_disc_identity_equal(&current, &data->disc_identity) ?
+                       XEMU_SNAPSHOT_DISC_MATCH :
+                       XEMU_SNAPSHOT_DISC_MISMATCH;
+        }
+    }
+
+    g_autofree char *current_path = xemu_get_currently_loaded_disc_path();
+    return (current_path && data->disc_path &&
+            !strcmp(current_path, data->disc_path)) ?
+               XEMU_SNAPSHOT_DISC_MATCH :
+               XEMU_SNAPSHOT_DISC_MISMATCH;
+}
+
 void xemu_snapshots_load(const char *vm_name, Error **err)
 {
     bool vm_running = runstate_is_running();
@@ -249,7 +312,12 @@ void xemu_snapshots_load(const char *vm_name, Error **err)
 
 void xemu_snapshots_save(const char *vm_name, Error **err)
 {
+    xemu_snapshots_has_disc_identity =
+        xemu_get_currently_loaded_disc_identity(&xemu_snapshots_disc_identity);
+
     save_snapshot(vm_name, true, NULL, false, NULL, err);
+
+    xemu_snapshots_has_disc_identity = false;
 }
 
 void xemu_snapshots_delete(const char *vm_name, Error **err)
@@ -276,9 +344,18 @@ void xemu_snapshots_save_extra_data(QEMUFile *f)
     size_t thumbnail_size = 0;
     void *thumbnail_buf = xemu_snapshots_create_framebuffer_thumbnail_png(&thumbnail_size);
 
+    uint8_t disc_identity[XEMU_DISC_IDENTITY_SERIALIZED_SIZE];
+    size_t disc_identity_size = 0;
+    if (xemu_snapshots_has_disc_identity) {
+        xemu_disc_identity_serialize(&xemu_snapshots_disc_identity,
+                                     disc_identity);
+        disc_identity_size = sizeof(disc_identity);
+    }
+
     qemu_put_be32(f, XEMU_SNAPSHOT_DATA_MAGIC);
     qemu_put_be32(f, XEMU_SNAPSHOT_DATA_VERSION);
-    qemu_put_be32(f, 4 + path_size + 1 + xbe_title_name_size + 4 + thumbnail_size);
+    qemu_put_be32(f, 4 + path_size + 1 + xbe_title_name_size + 4 + thumbnail_size +
+                     4 + disc_identity_size);
 
     qemu_put_be32(f, path_size);
     if (path_size) {
@@ -296,6 +373,12 @@ void xemu_snapshots_save_extra_data(QEMUFile *f)
     if (thumbnail_size) {
         qemu_put_buffer(f, (const uint8_t *)thumbnail_buf, thumbnail_size);
         g_free(thumbnail_buf);
+    }
+
+    // Appended after the version 1 fields, older versions ignore it
+    qemu_put_be32(f, disc_identity_size);
+    if (disc_identity_size) {
+        qemu_put_buffer(f, disc_identity, disc_identity_size);
     }
 
     xemu_snapshots_dirty = true;

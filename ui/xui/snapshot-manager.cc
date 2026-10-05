@@ -72,25 +72,31 @@ void SnapshotManager::LoadSnapshotChecked(const char *name)
         return;
     }
 
-    char *current_disc_path = xemu_get_currently_loaded_disc_path();
-    if (data->disc_path && (!current_disc_path || strcmp(current_disc_path, data->disc_path))) {
+    switch (xemu_snapshots_check_disc(data)) {
+    case XEMU_SNAPSHOT_DISC_MISMATCH: {
+        char *current_disc_path = xemu_get_currently_loaded_disc_path();
         if (current_disc_path) {
             m_current_disc_path = current_disc_path;
+            g_free(current_disc_path);
         } else {
             m_current_disc_path.clear();
         }
-        m_target_disc_path = data->disc_path;
+        if (data->disc_path) {
+            m_target_disc_path = data->disc_path;
+        } else {
+            m_target_disc_path.clear();
+        }
         m_pending_load_name = name;
         m_open_pending = true;
-    } else {
-        if (!data->disc_path) {
-            xemu_eject_disc(NULL);
-        }
-        LoadSnapshot(name);
+        break;
     }
-
-    if (current_disc_path) {
-        g_free(current_disc_path);
+    case XEMU_SNAPSHOT_DISC_NONE:
+        xemu_eject_disc(NULL);
+        LoadSnapshot(name);
+        break;
+    case XEMU_SNAPSHOT_DISC_MATCH:
+        LoadSnapshot(name);
+        break;
     }
 }
 
