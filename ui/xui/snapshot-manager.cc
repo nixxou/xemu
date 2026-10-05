@@ -30,6 +30,7 @@ SnapshotManager::SnapshotManager()
     m_extra_data = NULL;
     m_load_failed = false;
     m_open_pending = false;
+    m_hdd_open_pending = false;
     m_snapshots_len = 0;
 }
 
@@ -56,18 +57,49 @@ void SnapshotManager::Refresh()
     }
 }
 
-void SnapshotManager::LoadSnapshotChecked(const char *name)
+XemuSnapshotData *SnapshotManager::FindSnapshotData(const char *name)
 {
     Refresh();
 
-    XemuSnapshotData *data = NULL;
+    if (xemu_snapshots_using_external_storage()) {
+        QEMUSnapshotInfo *info;
+        XemuSnapshotData *data;
+        return xemu_snapshots_external_lookup(name, &info, &data) ? data :
+                                                                    NULL;
+    }
+
     for (int i = 0; i < m_snapshots_len; i++) {
         if (!strcmp(m_snapshots[i].name, name)) {
-            data = &m_extra_data[i];
-            break;
+            return &m_extra_data[i];
         }
     }
 
+    return NULL;
+}
+
+void SnapshotManager::LoadSnapshotChecked(const char *name)
+{
+    XemuSnapshotData *data = FindSnapshotData(name);
+    if (data == NULL) {
+        return;
+    }
+
+    // Loading an external snapshot replaces the content of the current HDD
+    const char *hdd_path = g_config.sys.files.hdd_path;
+    if (data->hdd_path && g_strcmp0(hdd_path, data->hdd_path)) {
+        m_current_hdd_path = hdd_path ? hdd_path : "";
+        m_target_hdd_path = data->hdd_path;
+        m_pending_load_name = name;
+        m_hdd_open_pending = true;
+        return;
+    }
+
+    LoadSnapshotDiscChecked(name);
+}
+
+void SnapshotManager::LoadSnapshotDiscChecked(const char *name)
+{
+    XemuSnapshotData *data = FindSnapshotData(name);
     if (data == NULL) {
         return;
     }
@@ -114,7 +146,46 @@ void SnapshotManager::LoadSnapshot(const char *name)
 
 void SnapshotManager::Draw()
 {
+    DrawSnapshotHddLoadDialog();
     DrawSnapshotDiscLoadDialog();
+}
+
+void SnapshotManager::DrawSnapshotHddLoadDialog()
+{
+    if (m_hdd_open_pending) {
+        ImGui::OpenPopup("Hard Disk Image");
+        m_hdd_open_pending = false;
+    }
+
+    if (!ImGui::BeginPopupModal("Hard Disk Image", NULL,
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+
+    ImGui::Text("The snapshot was created with another hard disk image:");
+    ImGui::Spacing();
+    ImGui::Indent();
+    ImGui::Text("Current Image: %s", m_current_hdd_path.length() ?
+                                         m_current_hdd_path.c_str() :
+                                         "(None)");
+    ImGui::Text("Snapshot Image: %s", m_target_hdd_path.c_str());
+    ImGui::Unindent();
+    ImGui::Spacing();
+    ImGui::Text("Loading it replaces the content of the current image.");
+
+    ImGui::Dummy(ImVec2(0, 16));
+
+    if (ImGui::Button("Load", ImVec2(120, 0))) {
+        ImGui::CloseCurrentPopup();
+        LoadSnapshotDiscChecked(m_pending_load_name.c_str());
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
 }
 
 void SnapshotManager::DrawSnapshotDiscLoadDialog()

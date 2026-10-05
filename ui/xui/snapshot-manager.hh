@@ -28,20 +28,26 @@ public:
     XemuSnapshotData *m_extra_data;
     bool m_load_failed;
     bool m_open_pending;
+    bool m_hdd_open_pending;
     int m_snapshots_len;
 
     std::string m_pending_load_name;
     std::string m_current_disc_path;
     std::string m_target_disc_path;
+    std::string m_current_hdd_path;
+    std::string m_target_hdd_path;
 
     SnapshotManager();
     ~SnapshotManager();
     void Refresh();
+    XemuSnapshotData *FindSnapshotData(const char *name);
     void LoadSnapshot(const char *name);
     void LoadSnapshotChecked(const char *name);
+    void LoadSnapshotDiscChecked(const char *name);
 
     void Draw();
     void DrawSnapshotDiscLoadDialog();
+    void DrawSnapshotHddLoadDialog();
 };
 
 extern SnapshotManager g_snapshot_mgr;

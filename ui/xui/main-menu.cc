@@ -1326,8 +1326,22 @@ void MainMenuSnapshotsView::Draw()
                              &m_search_buf, ImGuiInputTextFlags_CallbackEdit,
                              &OnSearchTextUpdate, this);
 
+    // External snapshot names are scoped by title
+    bool external_storage = xemu_snapshots_using_external_storage();
+    uint32_t running_title_id = 0;
+    if (external_storage) {
+        struct xbe *xbe = xemu_get_xbe_info();
+        if (xbe && xbe->cert) {
+            running_title_id = xbe->cert->m_titleid;
+        }
+    }
+
     bool snapshot_with_create_name_exists = false;
     for (int i = 0; i < g_snapshot_mgr.m_snapshots_len; ++i) {
+        if (external_storage &&
+            g_snapshot_mgr.m_extra_data[i].title_id != running_title_id) {
+            continue;
+        }
         if (g_strcmp0(m_search_buf.c_str(),
                       g_snapshot_mgr.m_snapshots[i].name) == 0) {
             snapshot_with_create_name_exists = true;
@@ -1420,7 +1434,7 @@ void MainMenuSnapshotsView::Draw()
         ImGui::PopID();
 
         if (load) {
-            ActionLoadSnapshotChecked(snapshot->name);
+            ActionLoadSnapshotChecked(xemu_snapshots_get_key(snapshot));
         }
 
         at_least_one_snapshot_displayed = true;
@@ -1454,7 +1468,7 @@ void MainMenuSnapshotsView::DrawSnapshotContextMenu(
     }
 
     if (ImGui::MenuItem("Load")) {
-        ActionLoadSnapshotChecked(snapshot->name);
+        ActionLoadSnapshotChecked(xemu_snapshots_get_key(snapshot));
     }
 
     if (ImGui::BeginMenu("Keybinding")) {
@@ -1493,11 +1507,11 @@ void MainMenuSnapshotsView::DrawSnapshotContextMenu(
     Error *err = NULL;
 
     if (ImGui::MenuItem("Replace")) {
-        xemu_snapshots_save(snapshot->name, &err);
+        xemu_snapshots_save(xemu_snapshots_get_key(snapshot), &err);
     }
 
     if (ImGui::MenuItem("Delete")) {
-        xemu_snapshots_delete(snapshot->name, &err);
+        xemu_snapshots_delete(xemu_snapshots_get_key(snapshot), &err);
     }
 
     if (err) {

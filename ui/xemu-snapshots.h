@@ -44,6 +44,12 @@ typedef struct XemuSnapshotData {
     GLuint gl_thumbnail;
     bool has_disc_identity;
     XemuDiscIdentity disc_identity;
+
+    // External storage only
+    uint32_t title_id;
+    uint64_t ram_size;
+    char *hdd_path;
+    char *xemu_version;
 } XemuSnapshotData;
 
 typedef enum XemuSnapshotDiscCheck {
@@ -60,11 +66,29 @@ int xemu_snapshots_list(QEMUSnapshotInfo **info, XemuSnapshotData **extra_data,
 void xemu_snapshots_load(const char *vm_name, Error **err);
 void xemu_snapshots_save(const char *vm_name, Error **err);
 void xemu_snapshots_delete(const char *vm_name, Error **err);
+bool xemu_snapshots_using_external_storage(void);
+const char *xemu_snapshots_get_key(const QEMUSnapshotInfo *info);
 XemuSnapshotDiscCheck xemu_snapshots_check_disc(const XemuSnapshotData *data);
 
 void xemu_snapshots_save_extra_data(QEMUFile *f);
 bool xemu_snapshots_offset_extra_data(QEMUFile *f);
 void xemu_snapshots_mark_dirty(void);
+
+// Implemented in xemu-snapshots-external.c
+int xemu_snapshots_external_list(QEMUSnapshotInfo **info,
+                                 XemuSnapshotData **extra_data, Error **err);
+bool xemu_snapshots_external_lookup(const char *ref, QEMUSnapshotInfo **info,
+                                    XemuSnapshotData **data);
+bool xemu_snapshots_external_read_info(const char *path,
+                                       QEMUSnapshotInfo *info,
+                                       XemuSnapshotData *data,
+                                       bool load_thumbnail, Error **errp);
+void xemu_snapshots_external_load(const char *ref, Error **errp);
+void xemu_snapshots_external_load_file(const char *path, Error **errp);
+void xemu_snapshots_external_save(const char *ref, Error **errp);
+void xemu_snapshots_external_delete(const char *ref, Error **errp);
+void xemu_snapshots_external_mark_dirty(void);
+void xemu_snapshots_external_free_data(XemuSnapshotData *data);
 
 // Implemented in xemu-thumbnail.cc
 void xemu_snapshots_set_framebuffer_texture(GLuint tex, bool flip);

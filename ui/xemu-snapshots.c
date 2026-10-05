@@ -203,6 +203,10 @@ int xemu_snapshots_list(QEMUSnapshotInfo **info, XemuSnapshotData **extra_data,
     int snapshots_len;
     assert(err);
 
+    if (xemu_snapshots_using_external_storage()) {
+        return xemu_snapshots_external_list(info, extra_data, err);
+    }
+
     if (!xemu_snapshots_dirty && xemu_snapshots_extra_data &&
         xemu_snapshots_metadata) {
         goto done;
@@ -301,8 +305,24 @@ XemuSnapshotDiscCheck xemu_snapshots_check_disc(const XemuSnapshotData *data)
                XEMU_SNAPSHOT_DISC_MISMATCH;
 }
 
+bool xemu_snapshots_using_external_storage(void)
+{
+    return g_config.general.snapshots.storage ==
+           CONFIG_GENERAL_SNAPSHOTS_STORAGE_EXTERNAL;
+}
+
+const char *xemu_snapshots_get_key(const QEMUSnapshotInfo *info)
+{
+    return xemu_snapshots_using_external_storage() ? info->id_str : info->name;
+}
+
 void xemu_snapshots_load(const char *vm_name, Error **err)
 {
+    if (xemu_snapshots_using_external_storage()) {
+        xemu_snapshots_external_load(vm_name, err);
+        return;
+    }
+
     bool vm_running = runstate_is_running();
     vm_stop(RUN_STATE_RESTORE_VM);
     if (load_snapshot(vm_name, NULL, false, NULL, err) && vm_running) {
@@ -315,13 +335,22 @@ void xemu_snapshots_save(const char *vm_name, Error **err)
     xemu_snapshots_has_disc_identity =
         xemu_get_currently_loaded_disc_identity(&xemu_snapshots_disc_identity);
 
-    save_snapshot(vm_name, true, NULL, false, NULL, err);
+    if (xemu_snapshots_using_external_storage()) {
+        xemu_snapshots_external_save(vm_name, err);
+    } else {
+        save_snapshot(vm_name, true, NULL, false, NULL, err);
+    }
 
     xemu_snapshots_has_disc_identity = false;
 }
 
 void xemu_snapshots_delete(const char *vm_name, Error **err)
 {
+    if (xemu_snapshots_using_external_storage()) {
+        xemu_snapshots_external_delete(vm_name, err);
+        return;
+    }
+
     delete_snapshot(vm_name, false, NULL, err);
 }
 
@@ -413,4 +442,5 @@ bool xemu_snapshots_offset_extra_data(QEMUFile *f)
 void xemu_snapshots_mark_dirty(void)
 {
     xemu_snapshots_dirty = true;
+    xemu_snapshots_external_mark_dirty();
 }

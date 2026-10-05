@@ -30,7 +30,9 @@ xemu_ss.add(files(
   'xemu.c',
   'xemu-data.c',
   'xemu-disc-identity.c',
+  'xemu-snapshot-file.c',
   'xemu-snapshots.c',
+  'xemu-snapshots-external.c',
   'xemu-thumbnail.cc',
   'xemu-widescreen.c',
 ))
@@ -55,7 +57,7 @@ elif host_os == 'windows'
 elif host_os == 'darwin'
   xemu_ss.add(files('xemu-os-utils-macos.m'))
 endif
-xemu_ss.add(imgui, implot, stb_image, sdl, opengl, fa, fpng, json, fatx, tomlplusplus, genconfig)
+xemu_ss.add(imgui, implot, stb_image, sdl, opengl, fa, fpng, json, fatx, tomlplusplus, genconfig, xxhash, zlib)
 system_ss.add_all(xemu_ss)
 
 system_ss.add(when: pixman, if_true: files('console-vc.c'), if_false: files('console-vc-stubs.c'))
