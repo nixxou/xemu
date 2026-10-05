@@ -147,6 +147,7 @@
 #include "ui/xemu-notifications.h"
 #include "ui/xemu-net.h"
 #include "ui/xemu-input.h"
+#include "ui/xemu-snapshots.h"
 #include "hw/xbox/eeprom_generation.h"
 
 #define MAX_VIRTIO_CONSOLES 1
@@ -176,6 +177,9 @@ static const char *incoming;
 static const char *incoming_str[MIGRATION_CHANNEL_TYPE__MAX];
 static MigrationChannel *incoming_channels[MIGRATION_CHANNEL_TYPE__MAX];
 static const char *loadvm;
+#ifdef XBOX
+static const char *xemu_snapshot_file;
+#endif
 static const char *accelerators;
 static bool have_custom_ram_size;
 static const char *ram_memdev_id;
@@ -2884,6 +2888,18 @@ void qmp_x_exit_preconfig(Error **errp)
         load_snapshot(loadvm, NULL, false, NULL, &error_fatal);
         load_snapshot_resume(state);
     }
+#ifdef XBOX
+    if (xemu_snapshot_file) {
+        Error *local_err = NULL;
+        xemu_snapshots_load_file(xemu_snapshot_file, &local_err);
+        if (local_err) {
+            error_prepend(&local_err, "-snapshot_file %s: ",
+                          xemu_snapshot_file);
+            xemu_queue_error_message(error_get_pretty(local_err));
+            error_report_err(local_err);
+        }
+    }
+#endif
     if (replay_mode != REPLAY_MODE_NONE) {
         replay_vmstate_init();
     }
@@ -3080,6 +3096,18 @@ void qemu_init(int argc, char **argv)
             argv[i] = NULL;
             if (i < argc - 1 && argv[i+1]) {
                 dvd_path = argv[i+1];
+                argv[i+1] = NULL;
+            }
+            break;
+        }
+    }
+
+    // Snapshot file to load once the machine is created
+    for (int i = 1; i < argc; i++) {
+        if (argv[i] && strcmp(argv[i], "-snapshot_file") == 0) {
+            argv[i] = NULL;
+            if (i < argc - 1 && argv[i+1]) {
+                xemu_snapshot_file = argv[i+1];
                 argv[i+1] = NULL;
             }
             break;

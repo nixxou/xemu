@@ -69,6 +69,7 @@ void xemu_snapshots_delete(const char *vm_name, Error **err);
 bool xemu_snapshots_using_external_storage(void);
 const char *xemu_snapshots_get_key(const QEMUSnapshotInfo *info);
 XemuSnapshotDiscCheck xemu_snapshots_check_disc(const XemuSnapshotData *data);
+void xemu_snapshots_load_file(const char *path, Error **err);
 
 void xemu_snapshots_save_extra_data(QEMUFile *f);
 bool xemu_snapshots_offset_extra_data(QEMUFile *f);

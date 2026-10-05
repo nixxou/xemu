@@ -33,11 +33,13 @@
 #include "migration/snapshot.h"
 #include "qapi/error.h"
 #include "qapi/qapi-commands-block.h"
+#include "qemu/error-report.h"
 #include "system/block-backend.h"
 #include "system/runstate.h"
 
 #include "ui/console.h"
 #include "ui/input.h"
+#include "ui/xui/xemu-hud.h"
 
 static QEMUSnapshotInfo *xemu_snapshots_metadata = NULL;
 static XemuSnapshotData *xemu_snapshots_extra_data = NULL;
@@ -314,6 +316,46 @@ bool xemu_snapshots_using_external_storage(void)
 const char *xemu_snapshots_get_key(const QEMUSnapshotInfo *info)
 {
     return xemu_snapshots_using_external_storage() ? info->id_str : info->name;
+}
+
+void xemu_snapshots_load_file(const char *path, Error **err)
+{
+    QEMUSnapshotInfo info;
+    XemuSnapshotData data;
+    if (!xemu_snapshots_external_read_info(path, &info, &data, false, err)) {
+        return;
+    }
+
+    switch (xemu_snapshots_check_disc(&data)) {
+    case XEMU_SNAPSHOT_DISC_MISMATCH:
+        error_setg(err,
+                   "The mounted disc does not match the one used by the "
+                   "snapshot (%s)",
+                   data.disc_path ? data.disc_path : "unknown disc");
+        goto out;
+    case XEMU_SNAPSHOT_DISC_NONE:
+        xemu_eject_disc(NULL);
+        break;
+    case XEMU_SNAPSHOT_DISC_MATCH:
+        break;
+    }
+
+    Error *local_err = NULL;
+    xemu_snapshots_external_load_file(path, &local_err);
+    if (local_err) {
+        error_propagate(err, local_err);
+        goto out;
+    }
+
+    const char *hdd_path = g_config.sys.files.hdd_path;
+    if (data.hdd_path && g_strcmp0(hdd_path, data.hdd_path)) {
+        warn_report("Snapshot '%s' was taken with HDD image '%s', restored "
+                    "it to '%s'",
+                    path, data.hdd_path, hdd_path);
+    }
+
+out:
+    xemu_snapshots_external_free_data(&data);
 }
 
 void xemu_snapshots_load(const char *vm_name, Error **err)
