@@ -138,6 +138,7 @@ if have_system
     'test-vmstate': [migration, io],
     'test-yank': ['socket-helpers.c', qom, io, chardev],
     'test-xemu-disc-identity': [meson.project_source_root() / 'ui/xemu-disc-identity.c'],
+    'test-xemu-snapshot-file': [meson.project_source_root() / 'ui/xemu-snapshot-file.c', zlib],
   }
   if config_host_data.get('CONFIG_INOTIFY1')
     tests += {'test-util-filemonitor': []}
