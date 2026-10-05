@@ -1302,6 +1302,13 @@ void MainMenuSnapshotsView::Draw()
            "Only display snapshots created while running the currently running "
            "XBE");
 
+    if (ChevronCombo("Storage", &g_config.general.snapshots.storage,
+                     "Hard disk image\0Files\0",
+                     "Where new snapshots are saved. Files can be copied and "
+                     "survive tools that rewrite the hard disk image")) {
+        xemu_snapshots_mark_dirty();
+    }
+
     if (g_config.general.snapshots.filter_current_game) {
         struct xbe *xbe = xemu_get_xbe_info();
         if (xbe && xbe->cert) {

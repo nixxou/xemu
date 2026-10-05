@@ -27,7 +27,9 @@ New settings in `[general.snapshots]`:
 | `dir`      | path                       | `<xemu data dir>/snapshots` |
 | `compress` | bool                       | `true`                      |
 
-With `storage = 'external'`, every new snapshot is a standalone file:
+`storage` can also be changed in the Snapshots tab ("Storage": Hard disk
+image / Files). With `storage = 'external'`, every new snapshot is a
+standalone file:
 
     <dir>/<TITLEID>/<name>.xsnap
 
