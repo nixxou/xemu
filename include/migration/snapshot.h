@@ -68,4 +68,26 @@ bool delete_snapshot(const char *name,
  */
 void load_snapshot_resume(RunState state);
 
+#ifdef XBOX
+/**
+ * xemu_save_vm_state: Write the VM state to a stream.
+ * @f: stream to write to, closed by the caller
+ * @errp: pointer to error object
+ * The VM must be stopped. The disks are not snapshotted.
+ * On success, return %true.
+ * On failure, store an error through @errp and return %false.
+ */
+bool xemu_save_vm_state(QEMUFile *f, Error **errp);
+
+/**
+ * xemu_load_vm_state: Reset the machine and load the VM state from a stream.
+ * @f: stream to read from, closed by this function
+ * @errp: pointer to error object
+ * The VM must be stopped. The disks are not touched.
+ * On success, return %true.
+ * On failure, store an error through @errp and return %false.
+ */
+bool xemu_load_vm_state(QEMUFile *f, Error **errp);
+#endif
+
 #endif

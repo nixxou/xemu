@@ -3479,6 +3479,59 @@ err_drain:
     return false;
 }
 
+#ifdef XBOX
+bool xemu_save_vm_state(QEMUFile *f, Error **errp)
+{
+    GLOBAL_STATE_CODE();
+
+    if (!migrate_can_snapshot(errp)) {
+        return false;
+    }
+
+    if (migration_is_blocked(errp)) {
+        return false;
+    }
+
+    if (!replay_can_snapshot()) {
+        error_setg(errp, "Record/replay does not allow making snapshot "
+                   "right now. Try once more later.");
+        return false;
+    }
+
+    return qemu_savevm_state(f, errp) == 0;
+}
+
+bool xemu_load_vm_state(QEMUFile *f, Error **errp)
+{
+    MigrationIncomingState *mis = migration_incoming_get_current();
+    int ret;
+
+    if (!migrate_can_snapshot(errp)) {
+        qemu_fclose(f);
+        return false;
+    }
+
+    replay_flush_events();
+    bdrv_drain_all_begin();
+
+    qemu_system_reset(SHUTDOWN_CAUSE_SNAPSHOT_LOAD);
+    mis->from_src_file = f;
+
+    if (!yank_register_instance(MIGRATION_YANK_INSTANCE, errp)) {
+        mis->from_src_file = NULL;
+        qemu_fclose(f);
+        bdrv_drain_all_end();
+        return false;
+    }
+    ret = qemu_loadvm_state(f, errp);
+    migration_incoming_state_destroy();
+
+    bdrv_drain_all_end();
+
+    return ret >= 0;
+}
+#endif
+
 void load_snapshot_resume(RunState state)
 {
     vm_resume(state);
